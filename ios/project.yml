@@ -1,0 +1,43 @@
+name: AIDMs
+options:
+  bundleIdPrefix: com.aidms
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  AIDMs:
+    type: application
+    platform: iOS
+    sources:
+      - path: AIDMs
+      - path: ../web
+        type: folder
+        buildPhase: resources
+    info:
+      path: AIDMs/Info.plist
+      properties:
+        CFBundleDisplayName: DMs
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen:
+          UIColorName: ""
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIViewControllerBasedStatusBarAppearance: true
+        UIUserInterfaceStyle: Dark
+        ITSAppUsesNonExemptEncryption: false
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSPhotoLibraryUsageDescription: Choose photos for profile pictures, chat backgrounds and messages.
+        NSCameraUsageDescription: Take photos to send in chats or use as profile pictures.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aidms.app
+        PRODUCT_NAME: AIDMs
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""

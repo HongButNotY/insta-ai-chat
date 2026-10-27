@@ -38,6 +38,11 @@ android {
         }
     }
 
+    // The UI is shared with the iOS app and lives in /web at the repo root.
+    sourceSets {
+        main.assets.srcDirs = ['../../web']
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17

@@ -235,3 +235,9 @@ input[type=range] { width: 100%; accent-color: var(--blue); }
 .spin { width: 18px; height: 18px; border: 2px solid var(--text2); border-top-color: transparent; border-radius: 50%; animation: rot .7s linear infinite; display: inline-block; }
 @keyframes rot { to { transform: rotate(360deg) } }
 .code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--bg2); padding: 10px; border-radius: 8px; white-space: pre-wrap; color: var(--text2); }
+
+/* iOS zooms into inputs under 16px on focus — bump them on iOS only. */
+html { -webkit-text-size-adjust: 100%; }
+@supports (-webkit-touch-callout: none) {
+  input, textarea, select, .pill textarea, .fld input[type=text], .fld input[type=password], .fld input[type=number], .fld textarea, .fld select { font-size: 16px; }
+}

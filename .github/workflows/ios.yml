@@ -1,0 +1,80 @@
+name: iOS build
+
+on:
+  push:
+    branches: [main]
+    paths: ["ios/**", "web/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Attach the IPA to this existing release tag (leave empty to skip)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      - name: Build unsigned IPA (device)
+        run: |
+          cd ios
+          xcodebuild -project AIDMs.xcodeproj -scheme AIDMs -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -40
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/AIDMs.app Payload/
+          zip -qr ../AI-DMs-unsigned.ipa Payload
+          ls -la ../AI-DMs-unsigned.ipa
+
+      - name: Smoke test in simulator
+        run: |
+          cd ios
+          xcodebuild -project AIDMs.xcodeproj -scheme AIDMs -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build-sim \
+            CODE_SIGNING_ALLOWED=NO build | tail -5
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)['devices']
+          print(next(x['udid'] for k,v in sorted(d.items(),reverse=True) if 'iOS' in k for x in v if x['name'].startswith('iPhone')))")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" build-sim/Build/Products/Debug-iphonesimulator/AIDMs.app
+          xcrun simctl launch "$UDID" com.aidms.app
+          sleep 25
+          mkdir -p ../shots
+          xcrun simctl io "$UDID" screenshot ../shots/launch.png
+          DATA=$(xcrun simctl get_app_container "$UDID" com.aidms.app data)
+          echo "Stored files:"; ls -la "$DATA/Library/Application Support/kv" | tee ../shots/kv.txt
+          test -s "$DATA/Library/Application Support/kv/state.json"
+          # Relaunch to check data is read back
+          xcrun simctl terminate "$UDID" com.aidms.app
+          xcrun simctl launch "$UDID" com.aidms.app
+          sleep 12
+          xcrun simctl io "$UDID" screenshot ../shots/relaunch.png
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AI-DMs-unsigned-ipa
+          path: AI-DMs-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simulator-screenshots
+          path: shots/
+
+      - name: Attach IPA to release
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ inputs.release_tag }}" AI-DMs-unsigned.ipa --clobber

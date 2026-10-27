@@ -12,7 +12,9 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const clone = o => JSON.parse(JSON.stringify(o));
 const trunc = (s, n) => (s = String(s || '')).length > n ? s.slice(0, n - 1) + '…' : s;
-const isAndroid = !!window.AndroidBridge;
+// Native shell bridge: AndroidBridge (Java) or IOSBridge (injected by the iOS app).
+const NB = window.AndroidBridge || window.IOSBridge || null;
+const isNative = !!NB;
 
 const ICONS = {
   back: '<path d="M15 5l-7 7 7 7"/>',
@@ -84,8 +86,21 @@ function isEmojiOnly(s) {
   return (t.match(/\p{Extended_Pictographic}/gu) || []).length <= 3;
 }
 
-// ---------- Storage (IndexedDB key/value) ----------
-const DB = {
+// ---------- Storage (IndexedDB key/value, or native files on iOS) ----------
+const kvWait = {}; let kvN = 0;
+window.__kvCb = (id, b64) => {
+  const f = kvWait[id]; delete kvWait[id];
+  let v;
+  try { v = b64 ? JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)))) : undefined; } catch (e) { v = undefined; }
+  f && f(v);
+};
+const NativeKV = {
+  open() { return Promise.resolve(); },
+  get(k) { return new Promise(res => { const id = 'k' + (++kvN); kvWait[id] = res; NB.kvGet(id, k); }); },
+  set(k, v) { NB.kvSet(k, JSON.stringify(v)); },
+  del(k) { NB.kvDel(k); },
+};
+const IdbKV = {
   db: null, mem: {},
   open() {
     return new Promise(res => {
@@ -107,6 +122,7 @@ const DB = {
   set(k, v) { if (!this.db) { this.mem[k] = v; return; } this.db.transaction('kv', 'readwrite').objectStore('kv').put(v, k); },
   del(k) { if (!this.db) { delete this.mem[k]; return; } this.db.transaction('kv', 'readwrite').objectStore('kv').delete(k); },
 };
+const DB = NB?.kvGet ? NativeKV : IdbKV;
 
 // ---------- State ----------
 const PROVIDERS = {
@@ -238,11 +254,11 @@ window.__httpCb = (id, status, b64) => {
   f && f({ status, text });
 };
 function http(method, url, headers = {}, body = '') {
-  if (window.AndroidBridge?.http) {
+  if (NB?.http) {
     return new Promise(res => {
       const id = 'h' + (++httpN);
       httpWait[id] = res;
-      AndroidBridge.http(id, method, url, JSON.stringify(headers), body || '');
+      NB.http(id, method, url, JSON.stringify(headers), body || '');
     });
   }
   return fetch(url, { method, headers, body: method === 'GET' ? undefined : body })
@@ -541,9 +557,23 @@ async function pickImage(max = 1280, square = false) {
   if (!f) return null;
   try { return await readImage(f, max, square); } catch (e) { toast(e.message); return null; }
 }
+function copyText(t) {
+  if (NB?.copy) { NB.copy(t); return toast('Copied'); }
+  const done = () => toast('Copied');
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(t).then(done, () => legacyCopy(t));
+  legacyCopy(t);
+}
+function legacyCopy(t) {
+  const ta = document.createElement('textarea');
+  ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+  ta.remove(); toast(ok ? 'Copied' : "Couldn't copy");
+}
 function saveFile(name, text) {
-  if (window.AndroidBridge?.saveFile) {
-    const r = AndroidBridge.saveFile(name, text);
+  if (NB?.saveFile) {
+    const r = NB.saveFile(name, text);
+    if (r === 'SHARE') return; // iOS shows the share sheet ("Save to Files")
     toast(r && !r.startsWith('ERR') ? 'Saved to Downloads/' + name : 'Could not save: ' + r, 3000);
     return;
   }
@@ -764,7 +794,7 @@ SCREENS.chat = ({ id }) => {
     c.draft = inp.value;
   };
   inp.oninput = () => { sync(); if (replyTimers[c.id]) scheduleReply(c); };
-  inp.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !isAndroid) { e.preventDefault(); doSend(); } };
+  inp.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !isNative) { e.preventDefault(); doSend(); } };
   const doSend = () => {
     const v = inp.value.trim(); if (!v) return;
     inp.value = ''; c.draft = ''; sync(); inp.focus();
@@ -917,7 +947,7 @@ function msgMenu(c, mid) {
   const EM = ['❤️', '😂', '😮', '😢', '😡', '👍', '🔥'];
   const items = [
     { label: 'Reply', icon: 'reply', fn: () => setReply(mid) },
-    ...(m.text ? [{ label: 'Copy', icon: 'copy', fn: () => { navigator.clipboard?.writeText(m.text).then(() => toast('Copied'), () => toast("Couldn't copy")); } }] : []),
+    ...(m.text ? [{ label: 'Copy', icon: 'copy', fn: () => copyText(m.text) }] : []),
     ...(m.text ? [{ label: 'Edit', icon: 'edit', fn: async () => { const v = await promptBox('Edit message', m.text, true); if (v != null && v.trim()) { m.text = v.trim(); saveMsgs(c.id); renderMsgs(); } } }] : []),
     ...(trailing ? [{ label: 'Regenerate reply', icon: 'refresh', fn: () => regenerate(c, m) }] : []),
     { label: mine ? 'Unsend' : 'Delete', icon: 'trash', danger: true, fn: () => { M[c.id] = M[c.id].filter(x => x.id !== mid); saveMsgs(c.id); renderMsgs(); } },
@@ -1240,7 +1270,7 @@ SCREENS.settings = (p) => {
 // ---------- Boot ----------
 function applyTheme() {
   document.documentElement.classList.toggle('light', !S.settings.dark);
-  try { window.AndroidBridge?.setDarkMode?.(!!S.settings.dark); } catch (e) {}
+  try { NB?.setDarkMode?.(!!S.settings.dark); } catch (e) {}
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); else { const top = stack[stack.length - 1]; if (top.name === 'chat') { const c = S.chats[top.id]; if (c && c.unread) { c.unread = 0; save(); } } } });
 window.addEventListener('pagehide', flush);
