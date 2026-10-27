@@ -1,0 +1,16 @@
+# Build output
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+
+# Signing key — keep private
+*.keystore
+*.jks
+android/keystore.properties
+
+# Personal / local
+*-profile.md
+.DS_Store
+.claude/
